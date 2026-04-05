@@ -1,0 +1,11 @@
+{
+  "name": "@panthi/config",
+  "version": "0.0.1",
+  "private": true,
+  "exports": {
+    "./tsconfig/base": "./tsconfig.base.json",
+    "./tsconfig/nextjs": "./tsconfig.nextjs.json",
+    "./tsconfig/nest": "./tsconfig.nest.json",
+    "./tsconfig/react-native": "./tsconfig.react-native.json"
+  }
+}

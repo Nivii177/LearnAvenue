@@ -1,0 +1,156 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Panthi Pro — Prisma Schema
+// Phase 1 MVP: Fee Ledger + Foundation
+//
+// Rules:
+//   - All IDs: cuid()
+//   - All main models: soft-delete via deletedAt DateTime?
+//   - Monetary values: stored in LKR cents (Int), never Float
+//   - month field on FeeRecord: always the 1st of the month at 00:00:00 UTC
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Teacher ──────────────────────────────────────────────────────────────────
+// A tuition teacher who owns the platform account.
+// Separate from Student — different auth flows, different data shape.
+
+model Teacher {
+  id           String    @id @default(cuid())
+  name         String
+  email        String    @unique
+  phone        String
+  passwordHash String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  batches  Batch[]
+  students Student[]
+
+  @@index([email])
+  @@map("teachers")
+}
+
+// ─── Batch ────────────────────────────────────────────────────────────────────
+// A class group under a teacher (e.g. "A/L Biology – Saturday Batch").
+// A teacher can have many batches. Students enroll into batches.
+
+model Batch {
+  id         String    @id @default(cuid())
+  name       String
+  teacherId  String
+  // Monthly fee in LKR cents. e.g. 250000 = Rs. 2,500
+  monthlyFee Int
+  // Human-readable schedule string, e.g. "Mon, Wed, Sat 3:00 PM"
+  schedule   String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+
+  teacher     Teacher      @relation(fields: [teacherId], references: [id])
+  enrollments Enrollment[]
+  feeRecords  FeeRecord[]
+
+  @@index([teacherId])
+  @@map("batches")
+}
+
+// ─── Student ──────────────────────────────────────────────────────────────────
+// A student registered under a teacher.
+// parentPhone is used for SMS reminders if set; falls back to student phone.
+
+model Student {
+  id          String    @id @default(cuid())
+  name        String
+  phone       String
+  parentPhone String?
+  teacherId   String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  teacher     Teacher      @relation(fields: [teacherId], references: [id])
+  enrollments Enrollment[]
+  feeRecords  FeeRecord[]
+
+  @@index([teacherId])
+  @@index([phone])
+  @@map("students")
+}
+
+// ─── Enrollment ───────────────────────────────────────────────────────────────
+// Links a Student to a Batch.
+// endedAt = null means the student is currently active in the batch.
+// A student can only have one active enrollment per batch at a time.
+
+model Enrollment {
+  id        String    @id @default(cuid())
+  studentId String
+  batchId   String
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+  deletedAt DateTime?
+
+  student Student @relation(fields: [studentId], references: [id])
+  batch   Batch   @relation(fields: [batchId], references: [id])
+
+  // A student can only be enrolled in a batch once at a time.
+  // To re-enroll after dropping, create a new Enrollment row.
+  @@unique([studentId, batchId])
+  @@index([batchId])
+  @@map("enrollments")
+}
+
+// ─── FeeRecord ────────────────────────────────────────────────────────────────
+// One record per (student, batch, month).
+// Created proactively for the current month for all active enrollments.
+//
+// "Who owes?" query: amountPaid < amountDue AND month = currentMonthKey()
+//
+// month is always stored as the 1st of the month at 00:00:00 UTC.
+// e.g. for April 2025 → 2025-04-01T00:00:00Z
+
+model FeeRecord {
+  id            String          @id @default(cuid())
+  studentId     String
+  batchId       String
+  // First day of the month, UTC. e.g. 2025-04-01T00:00:00Z
+  month         DateTime
+  // Amount owed in LKR cents
+  amountDue     Int
+  // Amount received in LKR cents (0 until payment recorded)
+  amountPaid    Int             @default(0)
+  paidAt        DateTime?
+  paymentMethod PaymentMethod?
+  notes         String?
+  // Tracks last reminder sent — prevents double-firing
+  reminderSentAt DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  deletedAt     DateTime?
+
+  student Student @relation(fields: [studentId], references: [id])
+  batch   Batch   @relation(fields: [batchId], references: [id])
+
+  // Only one fee record per student per batch per month
+  @@unique([studentId, batchId, month])
+  @@index([batchId, month])
+  @@index([studentId])
+  @@map("fee_records")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum PaymentMethod {
+  cash
+  online
+  waived
+}
