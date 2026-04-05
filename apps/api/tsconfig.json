@@ -1,6 +1,8 @@
 {
   "extends": "@panthi/config/tsconfig/nest",
   "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
     "paths": {
       "@panthi/types": ["../../packages/types/src/index.ts"],
       "@panthi/utils": ["../../packages/utils/src/index.ts"]
